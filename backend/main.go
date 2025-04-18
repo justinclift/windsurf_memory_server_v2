@@ -76,8 +76,30 @@ func main() {
 	s := fuego.NewServer()
 	fmt.Println("[DEBUG] Fuego server created.")
 
-	// Index
+	// Serve a simple HTML page at the root for listing latest memories (corrected query)
 	fuego.Get(s, "/", func(c fuego.ContextNoBody) (string, error) {
+		rows, err := db.Query(`SELECT m1.memory_id, m1.version, m1.content, m1.created_at, m1.updated_at FROM memories m1 WHERE m1.archived=0 AND m1.version = (SELECT MAX(m2.version) FROM memories m2 WHERE m2.memory_id = m1.memory_id AND m2.archived=0) ORDER BY m1.updated_at DESC LIMIT 50`)
+		if err != nil {
+			return "<h1>Error loading memories</h1>", nil
+		}
+		defer rows.Close()
+		var html string
+		html += `<!DOCTYPE html><html lang="en"><head><meta charset='UTF-8'><title>Memory Server</title><style>body{font-family:sans-serif;margin:2em;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:0.5em;}th{background:#f0f0f0;}tr:nth-child(even){background:#fafafa;}</style></head><body><h1>Latest Memories</h1><table><tr><th>Memory ID</th><th>Version</th><th>Content</th><th>Created</th><th>Updated</th></tr>`
+		for rows.Next() {
+			var memoryID, content string
+			var version int
+			var createdAt, updatedAt string
+			if err := rows.Scan(&memoryID, &version, &content, &createdAt, &updatedAt); err != nil {
+				continue
+			}
+			html += fmt.Sprintf("<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>", memoryID, version, content, createdAt, updatedAt)
+		}
+		html += "</table></body></html>"
+		return html, nil
+	})
+
+	// Index
+	fuego.Get(s, "/openapi.json", func(c fuego.ContextNoBody) (string, error) {
 		return "Windsurf Memory Server: See /openapi.json for API docs.", nil
 	})
 

@@ -174,4 +174,60 @@ func TestMemoryAPI(t *testing.T) {
 	if bytes.Contains(body, []byte(memID)) {
 		t.Error("deleted memory still present in list-memories")
 	}
+
+	// --- Extended test: multiple memories, versions, and archiving ---
+	mems := []struct{
+		ID string
+		Versions []string
+	}{
+		{"memA", []string{"A1", "A2", "A3"}},
+		{"memB", []string{"B1", "B2"}},
+		{"memC", []string{"C1"}},
+	}
+	// Clean slate
+	for _, m := range mems {
+		postJSON(t, "/delete-memory", map[string]string{"memory_id": m.ID})
+	}
+	// Insert all versions
+	for _, m := range mems {
+		for _, v := range m.Versions {
+			resp := postJSON(t, "/save-memory", map[string]string{"memory_id": m.ID, "content": v})
+			if resp.StatusCode != 200 {
+				t.Fatalf("save-memory failed for %s: %v", m.ID, resp.Status)
+			}
+		}
+	}
+	// Archive memB (delete)
+	resp = postJSON(t, "/delete-memory", map[string]string{"memory_id": "memB"})
+	if resp.StatusCode != 200 {
+		t.Fatalf("delete-memory failed for memB: %v", resp.Status)
+	}
+	// List memories and verify only latest, non-archived
+	resp = getJSON(t, "/list-memories")
+	if resp.StatusCode != 200 {
+		body, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("list-memories failed: %v\nBody: %s", resp.Status, string(body))
+	}
+	body, _ = ioutil.ReadAll(resp.Body)
+	resp.Body.Close()
+	var listed []Memory
+	if err := json.Unmarshal(body, &listed); err != nil {
+		t.Fatalf("list-memories unmarshal: %v", err)
+	}
+	foundA, foundB, foundC := false, false, false
+	for _, m := range listed {
+		if m.MemoryID == "memA" && m.Content == "A3" && !m.Archived {
+			foundA = true
+		}
+		if m.MemoryID == "memB" {
+			foundB = true // should NOT be found (archived)
+		}
+		if m.MemoryID == "memC" && m.Content == "C1" && !m.Archived {
+			foundC = true
+		}
+	}
+	if !foundA || foundB != false || !foundC {
+		t.Errorf("list-memories did not return expected latest non-archived: foundA=%v foundB=%v foundC=%v", foundA, foundB, foundC)
+	}
 }
