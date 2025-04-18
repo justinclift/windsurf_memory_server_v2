@@ -51,7 +51,11 @@ func main() {
 	fmt.Println("[DEBUG] Starting main()...")
 	dsn := os.Getenv("MEMORY_SERVER_DSN")
 	if dsn == "" {
-		dsn = "./memories.db"
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic("Could not determine user home directory")
+		}
+		dsn = home + "/Databases/memory_server.sqlite"
 	}
 	fmt.Printf("[DEBUG] Using DSN: %s\n", dsn)
 	db, err := sql.Open("sqlite3", dsn)
