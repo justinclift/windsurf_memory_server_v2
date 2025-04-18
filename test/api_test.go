@@ -82,7 +82,11 @@ func TestMemoryAPI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not start test server: %v", err)
 	}
-	defer stopTestServer(cmd)
+	defer func() {
+		// Attempt graceful shutdown via /shutdown endpoint
+		http.Post(baseURL+"/shutdown", "application/json", nil)
+		stopTestServer(cmd)
+	}()
 
 	memID := "test-memory-title"
 	content1 := "This is the first version."
