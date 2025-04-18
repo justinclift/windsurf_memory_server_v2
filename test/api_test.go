@@ -241,4 +241,35 @@ func TestMemoryAPI(t *testing.T) {
 	if !foundA || foundB != false || !foundC {
 		t.Errorf("list-memories did not return expected latest non-archived: foundA=%v foundB=%v foundC=%v", foundA, foundB, foundC)
 	}
+
+	t.Run("list-memories-by-tag", func(t *testing.T) {
+		// Should return only memA (tag: gamma) and not memB (archived) or memC (no gamma tag)
+		resp := getJSON(t, "/list-memories-by-tag?tag=gamma")
+		if resp.StatusCode != 200 {
+			body, _ := ioutil.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("list-memories-by-tag failed: %v\nBody: %s", resp.Status, string(body))
+		}
+		body, _ := ioutil.ReadAll(resp.Body)
+		resp.Body.Close()
+		var filtered []Memory
+		if err := json.Unmarshal(body, &filtered); err != nil {
+			t.Fatalf("list-memories-by-tag unmarshal: %v", err)
+		}
+		foundMemA, foundMemB, foundMemC := false, false, false
+		for _, m := range filtered {
+			if m.MemoryID == "memA" && m.Content == "A3" && !m.Archived {
+				foundMemA = true
+			}
+			if m.MemoryID == "memB" {
+				foundMemB = true
+			}
+			if m.MemoryID == "memC" {
+				foundMemC = true
+			}
+		}
+		if !foundMemA || foundMemB || foundMemC {
+			t.Errorf("list-memories-by-tag did not return expected results: foundMemA=%v foundMemB=%v foundMemC=%v", foundMemA, foundMemB, foundMemC)
+		}
+	})
 }

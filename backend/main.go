@@ -188,6 +188,41 @@ func main() {
 		return memories, nil
 	})
 
+	// List memories by tag (latest, not archived)
+	fuego.Get(s, "/list-memories-by-tag", func(c fuego.ContextNoBody) ([]Memory, error) {
+		tag := c.QueryParam("tag")
+		if tag == "" {
+			return nil, fuego.BadRequestError{Title: "Bad Request", Detail: "Missing tag parameter"}
+		}
+		rows, err := db.Query(`SELECT id, memory_id, version, content, tags, archived, created_at, updated_at FROM memories WHERE archived=0 ORDER BY memory_id, version DESC`)
+		if err != nil {
+			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+		}
+		defer rows.Close()
+		var memories []Memory
+		for rows.Next() {
+			var m Memory
+			var tagsJSON []byte
+			var archivedBool bool
+			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &tagsJSON, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+			}
+			err = json.Unmarshal(tagsJSON, &m.Tags)
+			if err != nil {
+				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+			}
+			m.Archived = archivedBool
+			// Check if tag is present
+			for _, t := range m.Tags {
+				if t == tag {
+					memories = append(memories, m)
+					break
+				}
+			}
+		}
+		return memories, nil
+	})
+
 	// Get memory by id (latest, not archived)
 	fuego.Get(s, "/get-memory-by-id/{memory_id}", func(c fuego.ContextNoBody) (*Memory, error) {
 		memoryID := c.PathParam("memory_id")
