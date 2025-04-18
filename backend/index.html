@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Memory Server</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 2em; background: #f8f9fa; }
+    table { border-collapse: collapse; width: 100%; margin-top: 1em; }
+    th, td { border: 1px solid #ccc; padding: 0.5em; }
+    th { background: #f0f0f0; }
+    tr:nth-child(even) { background: #fafafa; }
+    .error { color: #c00; margin-bottom: 1em; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>Latest Memories</h1>
+    <div v-if="error" class="error">{{ error }}</div>
+    <table v-if="memories.length">
+      <thead>
+        <tr>
+          <th>Memory ID</th>
+          <th>Version</th>
+          <th>Content</th>
+          <th>Created</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="m in memories" :key="m.memory_id + '-' + m.version">
+          <td>{{ m.memory_id }}</td>
+          <td>{{ m.version }}</td>
+          <td>{{ m.content }}</td>
+          <td>{{ new Date(m.created_at).toLocaleString() }}</td>
+          <td>{{ new Date(m.updated_at).toLocaleString() }}</td>
+        </tr>
+      </tbody>
+    </table>
+    <div v-else>No memories found.</div>
+  </div>
+  <script>
+    const { createApp } = Vue;
+    createApp({
+      data() {
+        return {
+          memories: [],
+          error: ''
+        };
+      },
+      mounted() {
+        fetch('/list-memories')
+          .then(r => {
+            if (!r.ok) throw new Error('Failed to fetch memories');
+            return r.json();
+          })
+          .then(data => { this.memories = data; })
+          .catch(e => { this.error = e.message; });
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>

@@ -17,12 +17,15 @@ type Memory struct {
 	MemoryID  string    `json:"memory_id"`
 	Version   int       `json:"version"`
 	Content   string    `json:"content"`
+	Tags      []string  `json:"tags"`
 	Archived  bool      `json:"archived"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-const baseURL = "http://localhost:8080"
+// Use a test-only port to avoid interfering with real server
+const testPort = "18080"
+const baseURL = "http://localhost:" + testPort
 
 func postJSON(t *testing.T, path string, body interface{}) *http.Response {
 	data, _ := json.Marshal(body)
@@ -43,7 +46,7 @@ func getJSON(t *testing.T, path string) *http.Response {
 
 func startTestServer() (*exec.Cmd, error) {
 	cmd := exec.Command("go", "run", "../backend/main.go")
-	cmd.Env = append(os.Environ(), "MEMORY_SERVER_DSN=:memory:")
+	cmd.Env = append(os.Environ(), "MEMORY_SERVER_DSN=:memory:", "MEMORY_SERVER_PORT="+testPort)
 
 	logFile, err := os.Create("test_server.log")
 	if err != nil {
@@ -91,12 +94,14 @@ func TestMemoryAPI(t *testing.T) {
 	memID := "test-memory-title"
 	content1 := "This is the first version."
 	content2 := "This is the updated version."
+	tags1 := []string{"v1", "api", "test"}
+	tags2 := []string{"v2", "api", "test", "updated"}
 
 	// Clean slate: ensure delete
 	postJSON(t, "/delete-memory", map[string]string{"memory_id": memID})
 
 	// Save memory
-	resp := postJSON(t, "/save-memory", map[string]string{"memory_id": memID, "content": content1})
+	resp := postJSON(t, "/save-memory", map[string]interface{}{ "memory_id": memID, "content": content1, "tags": tags1 })
 	if resp.StatusCode != 200 {
 		t.Fatalf("save-memory failed: %v", resp.Status)
 	}
@@ -125,7 +130,7 @@ func TestMemoryAPI(t *testing.T) {
 	}
 
 	// Update memory
-	resp = postJSON(t, "/update-memory", map[string]string{"memory_id": memID, "content": content2})
+	resp = postJSON(t, "/update-memory", map[string]interface{}{ "memory_id": memID, "content": content2, "tags": tags2 })
 	if resp.StatusCode != 200 {
 		t.Fatalf("update-memory failed: %v", resp.Status)
 	}
@@ -141,8 +146,8 @@ func TestMemoryAPI(t *testing.T) {
 	if err := json.Unmarshal(body, &m); err != nil {
 		t.Fatalf("get-memory-by-id unmarshal: %v", err)
 	}
-	if m.Content != content2 || m.MemoryID != memID || m.Archived {
-		t.Errorf("get-memory-by-id did not return latest active version")
+	if m.Content != content2 || m.MemoryID != memID || m.Archived || len(m.Tags) != len(tags2) {
+		t.Errorf("get-memory-by-id did not return latest active version or tags: got tags %v, want %v", m.Tags, tags2)
 	}
 
 	// Search memories
@@ -178,11 +183,11 @@ func TestMemoryAPI(t *testing.T) {
 	// --- Extended test: multiple memories, versions, and archiving ---
 	mems := []struct{
 		ID string
-		Versions []string
+		Versions []struct{Content string; Tags []string}
 	}{
-		{"memA", []string{"A1", "A2", "A3"}},
-		{"memB", []string{"B1", "B2"}},
-		{"memC", []string{"C1"}},
+		{"memA", []struct{Content string; Tags []string}{{"A1", []string{"alpha"}}, {"A2", []string{"alpha","beta"}}, {"A3", []string{"alpha","gamma"}}}},
+		{"memB", []struct{Content string; Tags []string}{{"B1", []string{"bravo"}}, {"B2", []string{"bravo","beta"}}}},
+		{"memC", []struct{Content string; Tags []string}{{"C1", []string{"charlie"}}}},
 	}
 	// Clean slate
 	for _, m := range mems {
@@ -191,7 +196,7 @@ func TestMemoryAPI(t *testing.T) {
 	// Insert all versions
 	for _, m := range mems {
 		for _, v := range m.Versions {
-			resp := postJSON(t, "/save-memory", map[string]string{"memory_id": m.ID, "content": v})
+			resp := postJSON(t, "/save-memory", map[string]interface{}{ "memory_id": m.ID, "content": v.Content, "tags": v.Tags })
 			if resp.StatusCode != 200 {
 				t.Fatalf("save-memory failed for %s: %v", m.ID, resp.Status)
 			}
@@ -219,12 +224,18 @@ func TestMemoryAPI(t *testing.T) {
 	for _, m := range listed {
 		if m.MemoryID == "memA" && m.Content == "A3" && !m.Archived {
 			foundA = true
+			if len(m.Tags) != 2 || m.Tags[0] != "alpha" || m.Tags[1] != "gamma" {
+				t.Errorf("memA tags incorrect: got %v", m.Tags)
+			}
 		}
 		if m.MemoryID == "memB" {
 			foundB = true // should NOT be found (archived)
 		}
 		if m.MemoryID == "memC" && m.Content == "C1" && !m.Archived {
 			foundC = true
+			if len(m.Tags) != 1 || m.Tags[0] != "charlie" {
+				t.Errorf("memC tags incorrect: got %v", m.Tags)
+			}
 		}
 	}
 	if !foundA || foundB != false || !foundC {

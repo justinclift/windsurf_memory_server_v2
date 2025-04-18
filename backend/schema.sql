@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS memories (
     memory_id TEXT NOT NULL,           -- descriptive title/heading
     version INTEGER NOT NULL,          -- version number, increments per memory_id
     content TEXT NOT NULL,             -- memory content
+    tags TEXT,                        -- JSON array of tags
     archived BOOLEAN NOT NULL DEFAULT 0, -- true if archived, false if active
     created_at DATETIME NOT NULL,
     updated_at DATETIME NOT NULL

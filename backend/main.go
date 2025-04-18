@@ -3,13 +3,13 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/go-fuego/fuego"
@@ -21,19 +21,22 @@ type Memory struct {
 	MemoryID  string    `json:"memory_id"`
 	Version   int       `json:"version"`
 	Content   string    `json:"content"`
+	Tags      []string  `json:"tags"`
 	Archived  bool      `json:"archived"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type SaveMemoryInput struct {
-	MemoryID string `json:"memory_id"`
-	Content  string `json:"content"`
+	MemoryID string   `json:"memory_id"`
+	Content  string   `json:"content"`
+	Tags     []string `json:"tags"`
 }
 
 type UpdateMemoryInput struct {
-	MemoryID string `json:"memory_id"`
-	Content  string `json:"content"`
+	MemoryID string   `json:"memory_id"`
+	Content  string   `json:"content"`
+	Tags     []string `json:"tags"`
 }
 
 type DeleteMemoryInput struct {
@@ -76,27 +79,19 @@ func main() {
 	s := fuego.NewServer()
 	fmt.Println("[DEBUG] Fuego server created.")
 
-	// Serve a simple HTML page at the root for listing latest memories (corrected query)
-	fuego.Get(s, "/", func(c fuego.ContextNoBody) (string, error) {
-		rows, err := db.Query(`SELECT m1.memory_id, m1.version, m1.content, m1.created_at, m1.updated_at FROM memories m1 WHERE m1.archived=0 AND m1.version = (SELECT MAX(m2.version) FROM memories m2 WHERE m2.memory_id = m1.memory_id AND m2.archived=0) ORDER BY m1.updated_at DESC LIMIT 50`)
-		if err != nil {
-			return "<h1>Error loading memories</h1>", nil
-		}
-		defer rows.Close()
-		var html string
-		html += `<!DOCTYPE html><html lang="en"><head><meta charset='UTF-8'><title>Memory Server</title><style>body{font-family:sans-serif;margin:2em;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ccc;padding:0.5em;}th{background:#f0f0f0;}tr:nth-child(even){background:#fafafa;}</style></head><body><h1>Latest Memories</h1><table><tr><th>Memory ID</th><th>Version</th><th>Content</th><th>Created</th><th>Updated</th></tr>`
-		for rows.Next() {
-			var memoryID, content string
-			var version int
-			var createdAt, updatedAt string
-			if err := rows.Scan(&memoryID, &version, &content, &createdAt, &updatedAt); err != nil {
-				continue
+	// Serve the VueJS interface at the root using fuego.Get, robust to CWD
+	fuego.Get(s, "/", func(c fuego.ContextNoBody) (fuego.HTML, error) {
+		paths := []string{"backend/index.html", "index.html"}
+		for _, path := range paths {
+			data, err := os.ReadFile(path)
+			if err == nil {
+				return fuego.HTML(string(data)), nil
 			}
-			html += fmt.Sprintf("<tr><td>%s</td><td>%d</td><td>%s</td><td>%s</td><td>%s</td></tr>", memoryID, version, content, createdAt, updatedAt)
 		}
-		html += "</table></body></html>"
-		return html, nil
+		return fuego.HTML("<h1>index.html not found</h1>"), nil
 	})
+
+	// The API and other routes remain unchanged
 
 	// Index
 	fuego.Get(s, "/openapi.json", func(c fuego.ContextNoBody) (string, error) {
@@ -116,7 +111,11 @@ func main() {
 		}
 		version++
 		now := time.Now().UTC()
-		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, archived, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`, body.MemoryID, version, body.Content, now, now)
+		tagsJSON, err := json.Marshal(body.Tags)
+		if err != nil {
+			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+		}
+		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, tags, archived, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`, body.MemoryID, version, body.Content, tagsJSON, now, now)
 		if err != nil {
 			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 		}
@@ -140,7 +139,11 @@ func main() {
 		}
 		version++
 		now := time.Now().UTC()
-		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, archived, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`, body.MemoryID, version, body.Content, now, now)
+		tagsJSON, err := json.Marshal(body.Tags)
+		if err != nil {
+			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+		}
+		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, tags, archived, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)`, body.MemoryID, version, body.Content, tagsJSON, now, now)
 		if err != nil {
 			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 		}
@@ -162,7 +165,7 @@ func main() {
 
 	// List memories (latest, not archived)
 	fuego.Get(s, "/list-memories", func(c fuego.ContextNoBody) ([]Memory, error) {
-		rows, err := db.Query(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE archived=0 ORDER BY memory_id, version DESC`)
+		rows, err := db.Query(`SELECT id, memory_id, version, content, tags, archived, created_at, updated_at FROM memories WHERE archived=0 ORDER BY memory_id, version DESC`)
 		if err != nil {
 			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 		}
@@ -170,8 +173,13 @@ func main() {
 		var memories []Memory
 		for rows.Next() {
 			var m Memory
+			var tagsJSON []byte
 			var archivedBool bool
-			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &tagsJSON, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+			}
+			err = json.Unmarshal(tagsJSON, &m.Tags)
+			if err != nil {
 				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 			}
 			m.Archived = archivedBool
@@ -183,11 +191,16 @@ func main() {
 	// Get memory by id (latest, not archived)
 	fuego.Get(s, "/get-memory-by-id/{memory_id}", func(c fuego.ContextNoBody) (*Memory, error) {
 		memoryID := c.PathParam("memory_id")
-		row := db.QueryRow(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE memory_id=? AND archived=0 ORDER BY version DESC LIMIT 1`, memoryID)
+		row := db.QueryRow(`SELECT id, memory_id, version, content, tags, archived, created_at, updated_at FROM memories WHERE memory_id=? AND archived=0 ORDER BY version DESC LIMIT 1`, memoryID)
 		var m Memory
+		var tagsJSON []byte
 		var archivedBool bool
-		if err := row.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		if err := row.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &tagsJSON, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			return nil, fuego.NotFoundError{Title: "Not Found", Detail: "not found"}
+		}
+		err := json.Unmarshal(tagsJSON, &m.Tags)
+		if err != nil {
+			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 		}
 		m.Archived = archivedBool
 		return &m, nil
@@ -196,7 +209,7 @@ func main() {
 	// Search memories (active only)
 	fuego.Get(s, "/search-memories", func(c fuego.ContextNoBody) ([]Memory, error) {
 		q := c.QueryParam("q")
-		rows, err := db.Query(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE archived=0 AND (memory_id LIKE ? OR content LIKE ?) ORDER BY memory_id, version DESC`, "%"+q+"%", "%"+q+"%")
+		rows, err := db.Query(`SELECT id, memory_id, version, content, tags, archived, created_at, updated_at FROM memories WHERE archived=0 AND (memory_id LIKE ? OR content LIKE ?) ORDER BY memory_id, version DESC`, "%"+q+"%", "%"+q+"%")
 		if err != nil {
 			return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 		}
@@ -204,8 +217,13 @@ func main() {
 		var memories []Memory
 		for rows.Next() {
 			var m Memory
+			var tagsJSON []byte
 			var archivedBool bool
-			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &tagsJSON, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
+				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
+			}
+			err = json.Unmarshal(tagsJSON, &m.Tags)
+			if err != nil {
 				return nil, fuego.HTTPError{Status: http.StatusInternalServerError, Title: "Internal Server Error", Detail: err.Error()}
 			}
 			m.Archived = archivedBool
@@ -215,23 +233,30 @@ func main() {
 	})
 
 	// Test-only shutdown endpoint
+	shutdownRequested := false
 	fuego.Post(s, "/shutdown", func(c fuego.ContextNoBody) (string, error) {
-		shutdownRequested.Store(true)
-		return "shutting down", nil
+		shutdownRequested = true
+		return "Shutting down...", nil
 	})
 
-	fmt.Println("[DEBUG] Setting up HTTP server...")
+	// Allow port override via env var (MEMORY_SERVER_PORT)
+	port := os.Getenv("MEMORY_SERVER_PORT")
+	if port == "" {
+		port = "8080"
+	}
+	fmt.Printf("[DEBUG] Listening on :%s\n", port)
+	// Use http.Server as before, with dynamic port
 	httpServer := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":" + port,
 		Handler: s.Mux,
 	}
 
 	// Graceful shutdown on signal or /shutdown
 	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(quit, os.Interrupt)
 	go func() {
 		for {
-			if shutdownRequested.Load() {
+			if shutdownRequested {
 				fmt.Println("[DEBUG] /shutdown endpoint triggered, shutting down...")
 				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer cancel()
