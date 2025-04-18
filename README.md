@@ -13,7 +13,8 @@ When you start a new AI agent session, you just tell it to fetch the latest memo
 curl):
 
 ```
-Using curl, load the memories from the local memory server at http://localhost:8080/list-memories-by-tag?tag=memory_server
+Using curl, load the memories from the local memory server at 'http://localhost:8080/list-memories-by-tag?tag=memory_server'.
+Remember to quote the url, otherwise the shell can be confused by the ? character in that url.
 ```
 
 The tag bit is important if you have multiple projects using the same memory server.  That way you can keep the
