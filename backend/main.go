@@ -2,20 +2,17 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"time"
 
-	"github.com/gin-gonic/gin"
+	"github.com/go-fuego/fuego"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-// Memory represents a memory record
-// swagger:model
 type Memory struct {
 	ID        int       `json:"id"`
-	MemoryID  string    `json:"memory_id"` // descriptive title
+	MemoryID  string    `json:"memory_id"`
 	Version   int       `json:"version"`
 	Content   string    `json:"content"`
 	Archived  bool      `json:"archived"`
@@ -34,109 +31,86 @@ func main() {
 	}
 	defer db.Close()
 
-	// Initialize schema
 	_, err = db.Exec(readSchema())
 	if err != nil {
 		panic(err)
 	}
 
-	r := gin.Default()
+	r := fuego.NewRouter()
+	r.Info.Title = "Windsurf Memory Server API"
+	r.Info.Version = "1.0"
+	r.Info.Description = "API for storing and managing versioned memories."
 
-	// Index route
-	r.GET("/", func(c *gin.Context) {
-		c.String(http.StatusOK, "Windsurf Memory Server: See /swagger/index.html for API docs.")
+	r.GET("/", func(c *fuego.Context) error {
+		return c.String(http.StatusOK, "Windsurf Memory Server: See /openapi.json for API docs.")
 	})
 
-	// Save memory
-	r.POST("/save-memory", func(c *gin.Context) {
+	r.POST("/save-memory").Summary("Save a new memory").RequestBody(Memory{}).ResponseBody(Memory{}).Handler(func(c *fuego.Context) error {
 		var req struct {
 			MemoryID string `json:"memory_id"`
 			Content  string `json:"content"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("/save-memory: bad request: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, fuego.H{"error": err.Error()})
 		}
 		var version int
 		err := db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM memories WHERE memory_id = ?", req.MemoryID).Scan(&version)
 		if err != nil {
-			log.Printf("/save-memory: version query failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
 		version++
 		now := time.Now().UTC()
 		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, archived, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`, req.MemoryID, version, req.Content, now, now)
 		if err != nil {
-			log.Printf("/save-memory: insert failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "saved", "memory_id": req.MemoryID, "version": version})
+		return c.JSON(http.StatusOK, fuego.H{"status": "saved", "memory_id": req.MemoryID, "version": version})
 	})
 
-	// Update memory
-	r.POST("/update-memory", func(c *gin.Context) {
+	r.POST("/update-memory").Summary("Update an existing memory").RequestBody(Memory{}).ResponseBody(Memory{}).Handler(func(c *fuego.Context) error {
 		var req struct {
 			MemoryID string `json:"memory_id"`
 			Content  string `json:"content"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("/update-memory: bad request: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, fuego.H{"error": err.Error()})
 		}
 		_, err := db.Exec("UPDATE memories SET archived=1 WHERE memory_id=? AND archived=0", req.MemoryID)
 		if err != nil {
-			log.Printf("/update-memory: archive failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
 		var version int
 		err = db.QueryRow("SELECT COALESCE(MAX(version), 0) FROM memories WHERE memory_id = ?", req.MemoryID).Scan(&version)
 		if err != nil {
-			log.Printf("/update-memory: version query failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
 		version++
 		now := time.Now().UTC()
 		_, err = db.Exec(`INSERT INTO memories (memory_id, version, content, archived, created_at, updated_at) VALUES (?, ?, ?, 0, ?, ?)`, req.MemoryID, version, req.Content, now, now)
 		if err != nil {
-			log.Printf("/update-memory: insert failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "updated", "memory_id": req.MemoryID, "version": version})
+		return c.JSON(http.StatusOK, fuego.H{"status": "updated", "memory_id": req.MemoryID, "version": version})
 	})
 
-	// Delete memory (archive all)
-	r.POST("/delete-memory", func(c *gin.Context) {
+	r.POST("/delete-memory").Summary("Archive all versions of a memory").RequestBody(Memory{}).Handler(func(c *fuego.Context) error {
 		var req struct {
 			MemoryID string `json:"memory_id"`
 		}
-		if err := c.ShouldBindJSON(&req); err != nil {
-			log.Printf("/delete-memory: bad request: %v", err)
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
+		if err := c.Bind(&req); err != nil {
+			return c.JSON(http.StatusBadRequest, fuego.H{"error": err.Error()})
 		}
 		_, err := db.Exec("UPDATE memories SET archived=1 WHERE memory_id=?", req.MemoryID)
 		if err != nil {
-			log.Printf("/delete-memory: archive all failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
-		c.JSON(http.StatusOK, gin.H{"status": "archived", "memory_id": req.MemoryID})
+		return c.JSON(http.StatusOK, fuego.H{"status": "archived", "memory_id": req.MemoryID})
 	})
 
-	// List memories (latest, not archived)
-	r.GET("/list-memories", func(c *gin.Context) {
+	r.GET("/list-memories").Summary("List all active (not archived) memories").ResponseBody([]Memory{}).Handler(func(c *fuego.Context) error {
 		rows, err := db.Query(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE archived=0 ORDER BY memory_id, version DESC`)
 		if err != nil {
-			log.Printf("/list-memories: query failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "details": "query failed"})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
 		defer rows.Close()
 		var memories []Memory
@@ -144,44 +118,31 @@ func main() {
 			var m Memory
 			var archivedBool bool
 			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
-				log.Printf("/list-memories: scan failed: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "details": "scan failed"})
-				return
+				return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 			}
 			m.Archived = archivedBool
 			memories = append(memories, m)
 		}
-		if err := rows.Err(); err != nil {
-			log.Printf("/list-memories: rows.Err: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error(), "details": "rows.Err failed"})
-			return
-		}
-		c.JSON(http.StatusOK, memories)
+		return c.JSON(http.StatusOK, memories)
 	})
 
-	// Get memory by id (latest, not archived)
-	r.GET("/get-memory-by-id/:memory_id", func(c *gin.Context) {
+	r.GET("/get-memory-by-id/{memory_id}").Summary("Get the latest active version of a memory by memory_id").ResponseBody(Memory{}).Handler(func(c *fuego.Context) error {
 		memoryID := c.Param("memory_id")
 		row := db.QueryRow(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE memory_id=? AND archived=0 ORDER BY version DESC LIMIT 1`, memoryID)
 		var m Memory
 		var archivedBool bool
 		if err := row.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
-			log.Printf("/get-memory-by-id: scan failed: %v", err)
-			c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
-			return
+			return c.JSON(http.StatusNotFound, fuego.H{"error": "not found"})
 		}
 		m.Archived = archivedBool
-		c.JSON(http.StatusOK, m)
+		return c.JSON(http.StatusOK, m)
 	})
 
-	// Search memories (active only)
-	r.GET("/search-memories", func(c *gin.Context) {
+	r.GET("/search-memories").Summary("Search all active memories by memory_id or content").QueryParam("q", "string").ResponseBody([]Memory{}).Handler(func(c *fuego.Context) error {
 		q := c.Query("q")
 		rows, err := db.Query(`SELECT id, memory_id, version, content, archived, created_at, updated_at FROM memories WHERE archived=0 AND (memory_id LIKE ? OR content LIKE ?) ORDER BY memory_id, version DESC`, "%"+q+"%", "%"+q+"%")
 		if err != nil {
-			log.Printf("/search-memories: query failed: %v", err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
+			return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 		}
 		defer rows.Close()
 		var memories []Memory
@@ -189,20 +150,17 @@ func main() {
 			var m Memory
 			var archivedBool bool
 			if err := rows.Scan(&m.ID, &m.MemoryID, &m.Version, &m.Content, &archivedBool, &m.CreatedAt, &m.UpdatedAt); err != nil {
-				log.Printf("/search-memories: scan failed: %v", err)
-				c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-				return
+				return c.JSON(http.StatusInternalServerError, fuego.H{"error": err.Error()})
 			}
 			m.Archived = archivedBool
 			memories = append(memories, m)
 		}
-		c.JSON(http.StatusOK, memories)
+		return c.JSON(http.StatusOK, memories)
 	})
 
 	r.Run(":8080")
 }
 
-// readSchema returns the schema SQL for initializing the DB
 func readSchema() string {
 	return `CREATE TABLE IF NOT EXISTS memories (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
