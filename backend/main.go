@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
@@ -238,16 +239,12 @@ func main() {
 }
 
 func readSchema() string {
-	return `CREATE TABLE IF NOT EXISTS memories (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		memory_id TEXT NOT NULL,
-		version INTEGER NOT NULL,
-		content TEXT NOT NULL,
-		archived BOOLEAN NOT NULL DEFAULT 0,
-		created_at DATETIME NOT NULL,
-		updated_at DATETIME NOT NULL
-	);
-	CREATE INDEX IF NOT EXISTS idx_memories_memory_id ON memories(memory_id);
-	CREATE INDEX IF NOT EXISTS idx_memories_archived ON memories(archived);
-	CREATE INDEX IF NOT EXISTS idx_memories_latest_active ON memories(memory_id, version, archived);`
+	paths := []string{"backend/schema.sql", "../backend/schema.sql", "schema.sql"}
+	for _, path := range paths {
+		data, err := ioutil.ReadFile(path)
+		if err == nil {
+			return string(data)
+		}
+	}
+	panic("Could not read schema.sql from any known location")
 }
