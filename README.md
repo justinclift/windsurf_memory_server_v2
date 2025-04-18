@@ -13,7 +13,7 @@ When you start a new AI agent session, you just tell it to fetch the latest memo
 curl):
 
 ```
-Using curl, load the memories from the local memory server at 'http://localhost:8080/list-memories-by-tag?tag=memory_server'.
+Using curl, load the memories from the local memory server at 'http://localhost:38080/list-memories-by-tag?tag=memory_server'.
 Remember to quote the url, otherwise the shell can be confused by the ? character in that url.
 ```
 
@@ -22,8 +22,8 @@ memories separate.
 
 ie:
 
-* http://localhost:8080/list-memories-by-tag?tag=memory_server
-* http://localhost:8080/list-memories-by-tag?tag=some_other_project
+* http://localhost:38080/list-memories-by-tag?tag=memory_server
+* http://localhost:38080/list-memories-by-tag?tag=some_other_project
 * etc
 
 ## Features
@@ -47,7 +47,7 @@ ie:
 $ git clone https://github.com/yourusername/windsurf_memory_server_v2
 $ cd windsurf_memory_server_v2
 
-# Start the server (default port 8080)
+# Start the server (default port 38080)
 $ go run backend/main.go
 ```
 
@@ -66,7 +66,7 @@ The server will create a SQLite database at `~/Databases/memory_server.sqlite` b
 
 To update a memory, have the agent save it in JSON format to a file and use:
 ```sh
-curl -X POST -H "Content-Type: application/json" --data-binary @update.json http://localhost:8080/update-memory
+curl -X POST -H "Content-Type: application/json" --data-binary @update.json http://localhost:38080/update-memory
 ```
 
 This avoids shell escaping issues.

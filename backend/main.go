@@ -277,7 +277,7 @@ func main() {
 	// Allow port override via env var (MEMORY_SERVER_PORT)
 	port := os.Getenv("MEMORY_SERVER_PORT")
 	if port == "" {
-		port = "8080"
+		port = "38080"
 	}
 	fmt.Printf("[DEBUG] Listening on :%s\n", port)
 	// Use http.Server as before, with dynamic port
