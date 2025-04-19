@@ -7,7 +7,8 @@ That Cascade system isn't very good anyway, so running your own simple local mem
 better anyway even in the Windsurf IDE.
 
 That's what this project is.  Have it running in the background while you use the Windsurf AI agent, and every now
-and then tell it to update the memories in the memory server with any new important lessons learned or information.
+and then tell it to update the memories in the memory server with any new important lessons learned or any other
+important information.
 
 When you start a new AI agent session, you just tell it to fetch the latest memories from the memory server (using
 curl):
